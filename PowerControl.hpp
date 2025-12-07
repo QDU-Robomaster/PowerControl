@@ -3,7 +3,10 @@
 // clang-format off
 /* === MODULE MANIFEST V2 ===
 module_description: No description provided
-constructor_args: []
+constructor_args:
+  - task_stack_depth: 2048
+  - chassis: '@omni_chassis'
+  - superpower: '@super_power'
 template_args: []
 required_hardware: []
 depends: []
