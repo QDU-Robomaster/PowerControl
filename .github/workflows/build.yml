@@ -82,7 +82,7 @@ jobs:
         run: |
           xrobot_init_mod
 
-      - name: Add BlinkLED module
+      - name: Add modules
         run: |
           xrobot_add_mod BlinkLED --instance-id BlinkLED_0
           xrobot_add_mod Chassis --instance-id omni_chassis
