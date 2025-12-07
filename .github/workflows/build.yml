@@ -57,7 +57,16 @@ jobs:
         with:
           repository: QDU-Robomaster/Chassis
           path: Modules/Chassis
-          
+      - name: Checkout CMD module
+        uses: actions/checkout@v4
+        with:
+          repository: QDU-Robomaster/CMD
+          path: Modules/CMD
+      - name: Checkout SuperPower module
+        uses: actions/checkout@v4
+        with:
+          repository: QDU-Robomaster/SuperPower
+          path: Modules/SuperPower
       - name: Setup Python & Install deps
         run: |
           python3 -m pip install --upgrade pip
@@ -83,6 +92,8 @@ jobs:
         run: |
           xrobot_add_mod BlinkLED --instance-id BlinkLED_0
           xrobot_add_mod Chassis --instance-id omni_chassis
+          xrobot_add_mod SuperPower --instance-id super_power
+          xrobot_add_mod CMD --instance-id cmd
 
       - name: Add this repo module
         run: |
