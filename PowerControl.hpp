@@ -6,8 +6,9 @@ module_description: No description provided
 constructor_args:
   - task_stack_depth: 2048
   - chassis: '@&omni_chassis'
-  - superpower: '@super_power'
-template_args: []
+  - superpower: '@&super_power'
+template_args:
+  - ChassisType: Omni
 required_hardware: []
 depends: []
 === END MANIFEST === */
