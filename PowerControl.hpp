@@ -5,7 +5,7 @@
 module_description: No description provided
 constructor_args:
   - task_stack_depth: 2048
-  - chassis: '@omni_chassis'
+  - chassis: '@&omni_chassis'
   - superpower: '@super_power'
 template_args: []
 required_hardware: []
