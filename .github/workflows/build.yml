@@ -76,9 +76,10 @@ jobs:
           xrobot_add_mod RMMotor --instance-id motor_steer_1
           xrobot_add_mod RMMotor --instance-id motor_steer_2
           xrobot_add_mod RMMotor --instance-id motor_steer_3
+          xrobot_add_mod CMD --instance-id cmd
           xrobot_add_mod SuperPower --instance-id super_power
-          xrobot_add_mod Chassis --instance-id omni_chassis
           xrobot_add_mod PowerControl --instance-id power_control
+          xrobot_add_mod Chassis --instance-id omni_chassis
           cat ./User/xrobot.yaml
 
       - name: xrobot generate code
