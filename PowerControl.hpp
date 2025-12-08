@@ -24,14 +24,14 @@ depends: []
 #include "RLS.hpp"
 #include "SuperPower.hpp"
 
-struct PowerControlData {
-  float new_output_current[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-  bool enable = false;
-};
-
 template <typename ChassisType>
 class PowerControl : public LibXR::Application {
  public:
+  struct PowerControlData {
+    float new_output_current[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    bool enable = false;
+  };
+
   PowerControl(LibXR::HardwareContainer &hw, LibXR::ApplicationManager &app,
                uint32_t task_stack_depth,
                SuperPower *superpower)
