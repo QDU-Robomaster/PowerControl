@@ -16,7 +16,6 @@ depends: []
 #include <cmath>
 #include <cstdint>
 
-#include "Chassis.hpp"
 #include "app_framework.hpp"
 #include "matrix.h"
 #include "message.hpp"
