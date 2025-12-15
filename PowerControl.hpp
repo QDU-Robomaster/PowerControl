@@ -94,7 +94,7 @@ class PowerControl : public LibXR::Application {
       samples_3508_[1][0] += motor_data_.rotorspeed_rpm_3508[i] * motor_data_.rotorspeed_rpm_3508[i];
     }
 
-      params_3508_ = rls_.Update(samples_3508_, measured_power_ - machane_power_3508_ - k3_3508_);
+      params_3508_ = rls_.Update(samples_3508_, measured_power_ - machane_power_3508_ - k3_3508_ - machane_power_6020_ - k3_6020_);
       k1_3508_ = fmax(params_3508_[0][0], 2.0e-7);
       k2_3508_ = fmax(params_3508_[1][0], 2.0e-7);
 
@@ -114,7 +114,7 @@ class PowerControl : public LibXR::Application {
             motor_data_.rotorspeed_rpm_6020[i] * motor_data_.rotorspeed_rpm_6020[i];
       }
 
-      params_6020_ = rls_.Update(samples_6020_, measured_power_ - machane_power_6020_ - k3_6020_);
+      params_6020_ = rls_.Update(samples_6020_, measured_power_ - machane_power_3508_ - k3_3508_ - machane_power_6020_ - k3_6020_);
       k1_6020_ = fmax(params_6020_[0][0], 2.0e-7);
       k2_6020_ = fmax(params_6020_[1][0], 2.0e-7);
 
