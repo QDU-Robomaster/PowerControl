@@ -50,12 +50,6 @@ class PowerControl : public LibXR::Application {
                    LibXR::Thread::Priority::MEDIUM);
   }
 
-  // 禁止拷贝和移动，避免因 RLS<2> 不能拷贝导致的错误
-  PowerControl(const PowerControl &) = delete;
-  PowerControl &operator=(const PowerControl &) = delete;
-  PowerControl(PowerControl &&) = delete;
-  PowerControl &operator=(PowerControl &&) = delete;
-
   static void ThreadFunction(PowerControl *powercontrol) {
     powercontrol->mutex_.Lock();
 
@@ -81,6 +75,7 @@ class PowerControl : public LibXR::Application {
     }
   }
 
+  /*估计3508和6020电机的功率参数*/
   void CalculatePowerControlParam() {
 
     /*3508的参数估计*/
@@ -125,7 +120,7 @@ class PowerControl : public LibXR::Application {
     chassis_power_   = 0.0f;
     sum_error_       = 0.0f;
     required_power_  = 0.0f;
-    allocated_power_ = max_power;
+    allocated_power_total_ = max_power;
     allocated_power_6020_ = max_power * 0.8f; //6020电机分配80%的功率
     for(int i =0; i<4;i++){
       motor_power_3508_[i] = kt_3508_ * motor_data_.output_current_3508[i] * motor_data_.rotorspeed_rpm_3508[i] +
@@ -142,7 +137,7 @@ class PowerControl : public LibXR::Application {
       error_[i] = fabs(motor_data_.target_motor_omega_3508[i] - motor_data_.current_motor_omega_3508[i]);
 
       if(motor_power_3508_[i]<0 || motor_power_6020_[i]<0){
-          allocated_power_ -= (motor_power_3508_[i] + motor_power_6020_[i]); //可分配的功率变大
+          allocated_power_total_ -= (motor_power_3508_[i] + motor_power_6020_[i]); //可分配的功率变大
         }
       else {
         sum_error_ += error_[i];
@@ -168,7 +163,7 @@ class PowerControl : public LibXR::Application {
               continue;
           }
           /*对6020的功率分配*/
-          allocated_power_6020_ = allocated_power_ * 0.8f;
+          allocated_power_6020_ = allocated_power_total_ * 0.8f;
           float a_6020 = k1_6020_;
           float b_6020 = kt_6020_ * motor_data_.rotorspeed_rpm_6020[i];
           float c_6020 = k2_6020_ * motor_data_.rotorspeed_rpm_6020[i] * motor_data_.rotorspeed_rpm_6020[i] +  k3_6020_ / 4.0f - allocated_power_6020_ /4.0f;
@@ -196,7 +191,7 @@ class PowerControl : public LibXR::Application {
 
           float a = k1_3508_;
           float b = kt_3508_ * motor_data_.rotorspeed_rpm_3508[i];
-          float c = k2_3508_ * motor_data_.rotorspeed_rpm_3508[i] * motor_data_.rotorspeed_rpm_3508[i] +  k3_3508_ / 4.0f - fmin(allocated_power_ * power_weight, allocated_power_ * 0.2);
+          float c = k2_3508_ * motor_data_.rotorspeed_rpm_3508[i] * motor_data_.rotorspeed_rpm_3508[i] +  k3_3508_ / 4.0f - fmin(allocated_power_total_ * power_weight, allocated_power_total_ * 0.2);
 
           float delta_3508 = b * b - 4.0f * a * c;
           if(delta_3508 <0.0f){
@@ -234,37 +229,31 @@ class PowerControl : public LibXR::Application {
   Matrixf<2, 1> samples_3508_;
   Matrixf<2, 1> params_3508_ ; //速度 电流
 
+  float machane_power_3508_ = 0.0f; //机械功率
+  float estimated_power_3508_ = 0.0f;  // 估计功率
+  float scaled_motor_power_3508_[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float motor_power_3508_[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+
   Matrixf<2, 1> samples_6020_;
   Matrixf<2, 1> params_6020_;  // 速度 电流
 
-  float machane_power_3508_ = 0.0f; //机械功率
   float machane_power_6020_ = 0.0f;
-
-  float estimated_power_3508_ = 0.0f; //估计功率
   float estimated_power_6020_ = 0.0f;
+  float allocated_power_6020_ = 0.0f;
+  float scaled_motor_power_6020_[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float motor_power_6020_[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 
   float measured_power_ = 0.0f; //实测功率
-
-  float allocated_power_6020_ = 0.0f;
-
-  float scaled_motor_power_3508_[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-  float scaled_motor_power_6020_[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-
-  float allocated_power_ = 0.0f;
+  float allocated_power_total_ = 0.0f;
   float required_power_ = 0.0f;
 
   float chassis_power_ = 0.0f;
-  float motor_power_3508_[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-  float motor_power_6020_[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 
   float error_[4]= {0.0f, 0.0f, 0.0f, 0.0f};
   float sum_error_ = 0.0f;
 
-  PowerControlData powercontrol_data_;
-
   float error_power_distribution_set_ = 120.0f;
   float prop_power_distribution_set_ = 60.0f;
-
   float error_confidence_ = 0.0f;
 
   float kt_3508_ = 1.99688994e-6f;
@@ -277,5 +266,6 @@ class PowerControl : public LibXR::Application {
   float k2_6020_ = 0; //转子rpm
   float k3_6020_ = 1.0f; //失能状态下底盘的功率
 
+  PowerControlData powercontrol_data_;
   RLS<2> rls_;
 };
