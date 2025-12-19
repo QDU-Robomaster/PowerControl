@@ -23,6 +23,8 @@ depends: []
 #include "RLS.hpp"
 #include "SuperPower.hpp"
 
+#define CHASSIS_MAX_POWER 50.0f
+
 template <typename ChassisType>
 class PowerControl : public LibXR::Application {
  public:
@@ -67,7 +69,7 @@ class PowerControl : public LibXR::Application {
       powercontrol->mutex_.Lock();
       powercontrol->measured_power_ = powercontrol->superpower_->GetChassisPower();
       powercontrol->CalculatePowerControlParam();
-      powercontrol->OutputLimit(10.0);
+      powercontrol->OutputLimit(CHASSIS_MAX_POWER);
       powercontrol->topic_powercontrol_data_.Publish(powercontrol->powercontrol_data_);
       powercontrol->mutex_.Unlock();
 
@@ -256,15 +258,17 @@ class PowerControl : public LibXR::Application {
   float prop_power_distribution_set_ = 60.0f;
   float error_confidence_ = 0.0f;
 
+  /*3508的电机拟合参数*/
   float kt_3508_ = 1.99688994e-6f;
   float k1_3508_ = 0; //电流cmd
   float k2_3508_ = 0; //转子rpm
-  float k3_3508_ = 3.5f; //失能状态下底盘的功率
+  float k3_3508_ = 6.0f; //失能状态下底盘的功率
 
+  /*6020的功率拟合参数 全向和麦轮未用到 k3_6020_赋值为0*/
   float kt_6020_ = 1.42074505e-5f;
   float k1_6020_ = 0; //电流cmd
   float k2_6020_ = 0; //转子rpm
-  float k3_6020_ = 1.0f; //失能状态下底盘的功率
+  float k3_6020_ = 0.0f; //失能状态下底盘的功率
 
   PowerControlData powercontrol_data_;
   RLS<2> rls_;
