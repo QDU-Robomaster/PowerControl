@@ -16,6 +16,7 @@ depends: []
 #include <cmath>
 #include <cstdint>
 
+#include "MotorData.hpp"
 #include "app_framework.hpp"
 #include "matrix.h"
 #include "message.hpp"
@@ -25,20 +26,18 @@ depends: []
 
 #define CHASSIS_MAX_POWER 50.0f
 
-template <typename ChassisType>
 class PowerControl : public LibXR::Application {
  public:
   struct PowerControlData {
     float new_output_current_3508[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     float new_output_current_6020[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    bool enable = false;
+    bool is_power_limited = false;
   };
 
   PowerControl(LibXR::HardwareContainer &hw, LibXR::ApplicationManager &app,
                uint32_t task_stack_depth,
                SuperPower *superpower)
-      : topic_powercontrol_data_("powercontrol_data", sizeof(powercontrol_data_)),
-        superpower_(superpower),
+      : superpower_(superpower),
         rls_(1e-5f, 0.99999f) {
 
         UNUSED(hw);
@@ -55,7 +54,7 @@ class PowerControl : public LibXR::Application {
   static void ThreadFunction(PowerControl *powercontrol) {
     powercontrol->mutex_.Lock();
 
-    LibXR::Topic::ASyncSubscriber<typename ChassisType::MotorData> motor_data_suber("motor_data");
+    LibXR::Topic::ASyncSubscriber<MotorData> motor_data_suber("motor_data");
 
     motor_data_suber.StartWaiting();
     powercontrol->mutex_.Unlock();
@@ -70,7 +69,6 @@ class PowerControl : public LibXR::Application {
       powercontrol->measured_power_ = powercontrol->superpower_->GetChassisPower();
       powercontrol->CalculatePowerControlParam();
       powercontrol->OutputLimit(CHASSIS_MAX_POWER);
-      powercontrol->topic_powercontrol_data_.Publish(powercontrol->powercontrol_data_);
       powercontrol->mutex_.Unlock();
 
       powercontrol->thread_.Sleep(2);
@@ -92,8 +90,8 @@ class PowerControl : public LibXR::Application {
     }
 
       params_3508_ = rls_.Update(samples_3508_, measured_power_ - machane_power_3508_ - k3_3508_ - machane_power_6020_ - k3_6020_);
-      k1_3508_ = fmax(params_3508_[0][0], 2.0e-7);
-      k2_3508_ = fmax(params_3508_[1][0], 2.0e-7);
+      k1_3508_ = static_cast<float>(fmax(params_3508_[0][0], 2.0e-7));
+      k2_3508_ = static_cast<float>(fmax(params_3508_[1][0], 2.0e-7));
 
       estimated_power_3508_ = machane_power_3508_ + k1_3508_ * samples_3508_[0][0] + k2_3508_ * samples_3508_[1][0] + k3_3508_;
 
@@ -112,8 +110,8 @@ class PowerControl : public LibXR::Application {
       }
 
       params_6020_ = rls_.Update(samples_6020_, measured_power_ - machane_power_3508_ - k3_3508_ - machane_power_6020_ - k3_6020_);
-      k1_6020_ = fmax(params_6020_[0][0], 2.0e-7);
-      k2_6020_ = fmax(params_6020_[1][0], 2.0e-7);
+      k1_6020_ = static_cast<float>(fmax(params_6020_[0][0], 2.0e-7));
+      k2_6020_ = static_cast<float>(fmax(params_6020_[1][0], 2.0e-7));
 
       estimated_power_6020_ = machane_power_6020_ + k1_6020_ * samples_6020_[0][0] + k2_6020_ * samples_6020_[1][0] + k3_6020_;
   }
@@ -148,7 +146,7 @@ class PowerControl : public LibXR::Application {
     }
 
     if (chassis_power_ > max_power) {
-      powercontrol_data_.enable = true;
+      powercontrol_data_.is_power_limited = true;
       //误差较大的话 按照误差比例来分配功率
       if(sum_error_ >error_power_distribution_set_){
         error_confidence_ = 1.0f;
@@ -193,7 +191,7 @@ class PowerControl : public LibXR::Application {
 
           float a = k1_3508_;
           float b = kt_3508_ * motor_data_.rotorspeed_rpm_3508[i];
-          float c = k2_3508_ * motor_data_.rotorspeed_rpm_3508[i] * motor_data_.rotorspeed_rpm_3508[i] +  k3_3508_ / 4.0f - fmin(allocated_power_total_ * power_weight, allocated_power_total_ * 0.2);
+          float c = k2_3508_ * motor_data_.rotorspeed_rpm_3508[i] * motor_data_.rotorspeed_rpm_3508[i] +  k3_3508_ / 4.0f - static_cast<float>(fmin(allocated_power_total_ * power_weight, allocated_power_total_ * 0.2));
 
           float delta_3508 = b * b - 4.0f * a * c;
           if(delta_3508 <0.0f){
@@ -212,8 +210,12 @@ class PowerControl : public LibXR::Application {
           chassis_power_ += scaled_motor_power_3508_[i] + scaled_motor_power_6020_[i];
         }
     } else {
-      powercontrol_data_.enable = false;
+      powercontrol_data_.is_power_limited = false;
     }
+  }
+
+  PowerControlData GetPowerControlData() {
+    return powercontrol_data_;
   }
 
   void OnMonitor() override {}
@@ -221,9 +223,7 @@ class PowerControl : public LibXR::Application {
  private:
   LibXR::Thread thread_;
   LibXR::Mutex mutex_;
-  LibXR::Topic topic_powercontrol_data_;
 
-  typedef typename ChassisType::MotorData MotorData;
   MotorData motor_data_;
 
   SuperPower *superpower_;
