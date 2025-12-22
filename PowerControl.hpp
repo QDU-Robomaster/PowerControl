@@ -214,7 +214,7 @@ class PowerControl : public LibXR::Application {
     }
   }
 
-  PowerControlData GetPowerControlData() {
+  const PowerControlData GetPowerControlData() {
     return powercontrol_data_;
   }
 
