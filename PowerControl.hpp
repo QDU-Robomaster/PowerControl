@@ -214,8 +214,13 @@ class PowerControl : public LibXR::Application {
     }
   }
 
-  const PowerControlData GetPowerControlData() {
-    return powercontrol_data_;
+  PowerControlData GetPowerControlData() {
+    PowerControlData data;
+    mutex_.Lock();
+    data = powercontrol_data_;
+    mutex_.Unlock();
+
+    return data;
   }
 
   void OnMonitor() override {}
