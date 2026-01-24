@@ -12,7 +12,6 @@ depends: []
 === END MANIFEST === */
 // clang-format on
 
-#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
@@ -420,7 +419,7 @@ class PowerControl : public LibXR::Application {
   float measured_power_ = 0.0f;
   float chassis_power_ = 0.0f;
   //底盘功率的静态损耗
-  float k3_chassis_ =4.5f;
+  float k3_chassis_;
 
   // 功率分配参数
   float power_ratio_6020_ = 0.8f;
