@@ -22,18 +22,16 @@ depends: []
 #include "message.hpp"
 #include "thread.hpp"
 
-// 计算单个电机功率: P = kt*I*rpm + k1*I^2 + k2*rpm^2 + k3_share
-inline float calculate_motor_power(float current, float rpm,
-                                   float kt, float k1, float k2, float k3_share) {
-  return kt * current * rpm +
-         k1 * current * current +
-         k2 * rpm * rpm +
+/*计算单个电机功率: P = kt*I*rpm + k1*I^2 + k2*rpm^2 + k3_share*/
+inline float calculate_motor_power(float current, float rpm, float kt, float k1,
+                                   float k2, float k3_share) {
+  return kt * current * rpm + k1 * current * current + k2 * rpm * rpm +
          k3_share;
 }
 
-// 根据目标功率反解电流 (求解二次方程 k1*I^2 + kt*rpm*I + (k2*rpm^2 + k3 - P) = 0)
-inline float solve_current_for_power(float target_power, float rpm,
-                                     float kt, float k1, float k2, float k3_share,
+/* 根据目标功率反解电流 (求解二次方程 k1*I^2 + kt*rpm*I + (k2*rpm^2 + k3 - P)=0)*/
+inline float solve_current_for_power(float target_power, float rpm, float kt,
+                                     float k1, float k2, float k3_share,
                                      float original_current) {
   float a = k1;
   float b = kt * rpm;
@@ -51,9 +49,9 @@ inline float solve_current_for_power(float target_power, float rpm,
   }
 }
 
-// 计算误差置信度
-inline float calculate_error_confidence(float sum_error,
-                                        float threshold_low, float threshold_high) {
+/*计算误差置信度*/
+inline float calculate_error_confidence(float sum_error, float threshold_low,
+                                        float threshold_high) {
   if (sum_error > threshold_high) {
     return 1.0f;
   }
@@ -132,8 +130,8 @@ class PowerControl : public LibXR::Application {
   void OnMonitor() override {}
 
  private:
-  //全向轮or麦轮 功率参数估计
 
+  /*全向轮or麦轮 功率参数估计*/
   void CalculatePowerControlParamOmni() {
     measured_power_ = superpower_->GetChassisPower();
 
@@ -142,50 +140,53 @@ class PowerControl : public LibXR::Application {
     samples_3508_[1][0] = 0.0f;
 
     for (int i = 0; i < 4; i++) {
-      machane_power_3508_ += kt_3508_ * output_current_3508_[i] * rotorspeed_rpm_3508_[i];
+      machane_power_3508_ +=
+          kt_3508_ * output_current_3508_[i] * rotorspeed_rpm_3508_[i];
       samples_3508_[0][0] += output_current_3508_[i] * output_current_3508_[i];
       samples_3508_[1][0] += rotorspeed_rpm_3508_[i] * rotorspeed_rpm_3508_[i];
     }
 
-    params_3508_ = rls_.Update(samples_3508_, measured_power_ - machane_power_3508_ - k3_chassis_);
+    params_3508_ = rls_.Update(
+        samples_3508_, measured_power_ - machane_power_3508_ - k3_chassis_);
 
     k1_3508_ = static_cast<float>(fmax(params_3508_[0][0], 2.0e-7f));
     k2_3508_ = static_cast<float>(fmax(params_3508_[1][0], 2.0e-7f));
 
     estimated_power_3508_ = machane_power_3508_ +
                             k1_3508_ * samples_3508_[0][0] +
-                            k2_3508_ * samples_3508_[1][0] +
-                            k3_chassis_;
+                            k2_3508_ * samples_3508_[1][0] + k3_chassis_;
   }
 
-  //舵轮 功率参数估计
+  /*舵轮 功率参数估计*/
 
   void CalculatePowerControlParamHelm() {
     measured_power_ = superpower_->GetChassisPower();
 
-    // 3508参数估计
+    /* 3508参数估计 */
     machane_power_3508_ = 0.0f;
     samples_3508_[0][0] = 0.0f;
     samples_3508_[1][0] = 0.0f;
 
     for (int i = 0; i < 4; i++) {
-      machane_power_3508_ += kt_3508_ * output_current_3508_[i] * rotorspeed_rpm_3508_[i];
+      machane_power_3508_ +=
+          kt_3508_ * output_current_3508_[i] * rotorspeed_rpm_3508_[i];
       samples_3508_[0][0] += output_current_3508_[i] * output_current_3508_[i];
       samples_3508_[1][0] += rotorspeed_rpm_3508_[i] * rotorspeed_rpm_3508_[i];
     }
 
-    // 6020功率计算 (使用固定参数)
+    /* 6020功率计算 (使用固定参数) */
     machane_power_6020_ = 0.0f;
     samples_6020_[0][0] = 0.0f;
     samples_6020_[1][0] = 0.0f;
 
     for (int i = 0; i < 4; i++) {
-      machane_power_6020_ += kt_6020_ * output_current_6020_[i] * rotorspeed_rpm_6020_[i];
+      machane_power_6020_ +=
+          kt_6020_ * output_current_6020_[i] * rotorspeed_rpm_6020_[i];
       samples_6020_[0][0] += output_current_6020_[i] * output_current_6020_[i];
       samples_6020_[1][0] += rotorspeed_rpm_6020_[i] * rotorspeed_rpm_6020_[i];
     }
 
-    // 只拟合3508参数
+    /* 只拟合3508参数 */
     if (measured_power_ > 5.0f) {
       float residual = measured_power_ - machane_power_3508_ -
                        machane_power_6020_ - k3_chassis_;
@@ -204,8 +205,7 @@ class PowerControl : public LibXR::Application {
                             k2_6020_ * samples_6020_[1][0] + k3_chassis_;
   }
 
-  //全向轮or麦轮 功率限制
-
+  /*全向轮or麦轮 功率限制*/
   void OutputLimitOmni(float max_power) {
     float chassis_power = 0.0f;
     float sum_error = 0.0f;
@@ -213,8 +213,9 @@ class PowerControl : public LibXR::Application {
     float allocated_power = max_power;
 
     for (int i = 0; i < 4; i++) {
-      motor_power_3508_[i] = calculate_motor_power(output_current_3508_[i], rotorspeed_rpm_3508_[i],
-                              kt_3508_, k1_3508_, k2_3508_, k3_chassis_ / 4.0f);
+      motor_power_3508_[i] = calculate_motor_power(
+          output_current_3508_[i], rotorspeed_rpm_3508_[i], kt_3508_, k1_3508_,
+          k2_3508_, k3_chassis_ / 4.0f);
 
       chassis_power += motor_power_3508_[i];
       error_3508_[i] = fabs(target_omega_3508_[i] - current_omega_3508_[i]);
@@ -234,14 +235,16 @@ class PowerControl : public LibXR::Application {
 
       for (int i = 0; i < 4; i++) {
         if (motor_power_3508_[i] < 0) {
-          powercontrol_data_.new_output_current_3508[i] = output_current_3508_[i];
+          powercontrol_data_.new_output_current_3508[i] =
+              output_current_3508_[i];
           scaled_motor_power_3508_[i] = motor_power_3508_[i];
           continue;
         }
 
         float weight_error = error_3508_[i] / sum_error;
         float weight_prop = motor_power_3508_[i] / required_power;
-        float weight = error_conf * weight_error + (1.0f - error_conf) * weight_prop;
+        float weight =
+            error_conf * weight_error + (1.0f - error_conf) * weight_prop;
 
         powercontrol_data_.new_output_current_3508[i] = solve_current_for_power(
             allocated_power * weight, rotorspeed_rpm_3508_[i], kt_3508_,
@@ -249,8 +252,8 @@ class PowerControl : public LibXR::Application {
 
         scaled_motor_power_3508_[i] =
             calculate_motor_power(powercontrol_data_.new_output_current_3508[i],
-                                rotorspeed_rpm_3508_[i], kt_3508_, k1_3508_,
-                                k2_3508_, k3_chassis_ / 4.0f);
+                                  rotorspeed_rpm_3508_[i], kt_3508_, k1_3508_,
+                                  k2_3508_, k3_chassis_ / 4.0f);
       }
 
       for (int i = 0; i < 4; i++) {
@@ -264,7 +267,7 @@ class PowerControl : public LibXR::Application {
     }
   }
 
-  //舵轮 功率限制
+  /*舵轮 功率限制*/
   void OutputLimitHelm(float max_power) {
     float chassis_power = 0.0f;
     float allocated_power = max_power;
@@ -272,15 +275,15 @@ class PowerControl : public LibXR::Application {
     float required_power_6020 = 0.0f;
     float sum_error_3508 = 0.0f;
 
-    // 计算各电机功率
+    /* 计算各电机功率 */
     for (int i = 0; i < 4; i++) {
-      motor_power_3508_[i] =
-          calculate_motor_power(output_current_3508_[i], rotorspeed_rpm_3508_[i],
-                              kt_3508_, k1_3508_, k2_3508_, k3_chassis_ / 8.0f);
+      motor_power_3508_[i] = calculate_motor_power(
+          output_current_3508_[i], rotorspeed_rpm_3508_[i], kt_3508_, k1_3508_,
+          k2_3508_, k3_chassis_ / 8.0f);
 
-      motor_power_6020_[i] =
-          calculate_motor_power(output_current_6020_[i], rotorspeed_rpm_6020_[i],
-                              kt_6020_, k1_6020_, k2_6020_, k3_chassis_ / 8.0f);
+      motor_power_6020_[i] = calculate_motor_power(
+          output_current_6020_[i], rotorspeed_rpm_6020_[i], kt_6020_, k1_6020_,
+          k2_6020_, k3_chassis_ / 8.0f);
       chassis_power += motor_power_3508_[i] + motor_power_6020_[i];
       error_3508_[i] = fabs(target_omega_3508_[i] - current_omega_3508_[i]);
 
@@ -298,11 +301,11 @@ class PowerControl : public LibXR::Application {
       }
     }
 
-    // 超功率时进行限制
+    /* 超功率时进行限制 */
     if (chassis_power > max_power) {
       powercontrol_data_.is_power_limited = true;
 
-      // 6020优先分配 (保证转向优先级)
+      /* 6020优先分配 (保证转向优先级) */
       float alloc_6020 = 0.0f;
       float alloc_3508 = 0.0f;
       if (required_power_6020 > 0) {
@@ -313,25 +316,27 @@ class PowerControl : public LibXR::Application {
         alloc_3508 = allocated_power;
       }
 
-      // 限制6020 (均分功率)
+      /* 限制6020 (均分功率) */
       for (int i = 0; i < 4; i++) {
         if (motor_power_6020_[i] < 0) {
           powercontrol_data_.new_output_current_6020[i] =
               output_current_6020_[i];
           scaled_motor_power_6020_[i] = motor_power_6020_[i];
         } else {
-          powercontrol_data_.new_output_current_6020[i] = solve_current_for_power(
-              alloc_6020 / 4.0f, rotorspeed_rpm_6020_[i], kt_6020_, k1_6020_,
-              k2_6020_, k3_chassis_ / 8.0f, output_current_6020_[i]);
+          powercontrol_data_.new_output_current_6020[i] =
+              solve_current_for_power(alloc_6020 / 4.0f,
+                                      rotorspeed_rpm_6020_[i], kt_6020_,
+                                      k1_6020_, k2_6020_, k3_chassis_ / 8.0f,
+                                      output_current_6020_[i]);
 
-          scaled_motor_power_6020_[i] =
-              calculate_motor_power(powercontrol_data_.new_output_current_6020[i],
-                                  rotorspeed_rpm_6020_[i], kt_6020_, k1_6020_,
-                                  k2_6020_, k3_chassis_ / 8.0f);
+          scaled_motor_power_6020_[i] = calculate_motor_power(
+              powercontrol_data_.new_output_current_6020[i],
+              rotorspeed_rpm_6020_[i], kt_6020_, k1_6020_, k2_6020_,
+              k3_chassis_ / 8.0f);
         }
       }
 
-      // 限制3508 (按误差/比例混合分配)
+      /* 限制3508 (按误差/比例混合分配) */
       float error_conf = calculate_error_confidence(
           sum_error_3508, error_threshold_low_, error_threshold_high_);
 
@@ -354,11 +359,11 @@ class PowerControl : public LibXR::Application {
 
         scaled_motor_power_3508_[i] =
             calculate_motor_power(powercontrol_data_.new_output_current_3508[i],
-                                rotorspeed_rpm_3508_[i], kt_3508_, k1_3508_,
-                                k2_3508_, k3_chassis_ / 8.0f);
+                                  rotorspeed_rpm_3508_[i], kt_3508_, k1_3508_,
+                                  k2_3508_, k3_chassis_ / 8.0f);
       }
 
-      // 更新总功率
+      /* 更新总功率 */
       chassis_power_ = 0.0f;
       for (int i = 0; i < 4; i++) {
         chassis_power_ +=
@@ -381,7 +386,7 @@ class PowerControl : public LibXR::Application {
   RLS<2> rls_;
   PowerControlData powercontrol_data_;
 
-  //3508电机参数
+  /* 3508电机参数 */
   float kt_3508_ = 1.99688994e-6f;
   float k1_3508_ = 0.0f;
   float k2_3508_ = 0.0f;
@@ -399,7 +404,7 @@ class PowerControl : public LibXR::Application {
   float target_omega_3508_[4] = {};
   float current_omega_3508_[4] = {};
 
-  // 6020电机参数 (舵轮专用)
+  /* 6020电机参数 (舵轮专用) */
   float kt_6020_ = 1.42074505e-5f;
   float k1_6020_ = 1.0e-6f;
   float k2_6020_ = 1.0e-9f;
@@ -415,13 +420,13 @@ class PowerControl : public LibXR::Application {
   float target_omega_6020_[4] = {};
   float current_omega_6020_[4] = {};
 
-  // 通用参数
+  /* 通用参数 */
   float measured_power_ = 0.0f;
   float chassis_power_ = 0.0f;
-  //底盘功率的静态损耗
+  /* 底盘功率的静态损耗 */
   float k3_chassis_;
 
-  // 功率分配参数
+  /* 功率分配参数 */
   float power_ratio_6020_ = 0.8f;
   float error_threshold_high_ = 120.0f;
   float error_threshold_low_ = 60.0f;
