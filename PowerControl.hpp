@@ -6,7 +6,7 @@ module_description: Power control for chassis (supports omni and helm wheel)
 constructor_args:
   - superpower: '@&super_power'
   - is_helm: false
-  - chassis_static_power_loss: 0.5
+  - chassis_static_power_loss: 3.5
 template_args: []
 required_hardware: []
 depends: []
@@ -111,6 +111,10 @@ class PowerControl : public LibXR::Application {
     }
   }
 
+  /**
+   * @brief 计算功率控制参数
+   *
+   */
   void CalculatePowerControlParam() {
     /*从超电得到底盘的真实功率*/
     measured_power_ = superpower_->GetChassisPower();
@@ -147,6 +151,11 @@ class PowerControl : public LibXR::Application {
     }
   }
 
+  /**
+   * @brief 功率限幅
+   *
+   * @param max_power
+   */
   void OutputLimit(float max_power) {
     if (is_helm_) {
       OutputLimitHelm(max_power);
@@ -155,6 +164,11 @@ class PowerControl : public LibXR::Application {
     }
   }
 
+  /**
+   * @brief 获取功率控制数据
+   *
+   * @return PowerControlData
+   */
   PowerControlData GetPowerControlData() {
     PowerControlData data;
     mutex_.Lock();
@@ -166,6 +180,11 @@ class PowerControl : public LibXR::Application {
   void OnMonitor() override {}
 
  private:
+  /**
+   * @brief 功率限幅 - 全向底盘
+   *
+   * @param max_power
+   */
   void OutputLimitOmni(float max_power) {
     float required_power_3508_sum = 0.0f;
 
@@ -205,6 +224,11 @@ class PowerControl : public LibXR::Application {
     }
   }
 
+  /**
+   * @brief 功率限幅 - 舵轮底盘
+   *
+   * @param max_power
+   */
   void OutputLimitHelm(float max_power) {
     float required_power_3508_sum = 0.0f;
     float required_power_6020_sum = 0.0f;
@@ -240,11 +264,11 @@ class PowerControl : public LibXR::Application {
     if (total_required_power > available_power) {
       powercontrol_data_.is_power_limited = true;
 
-      /*计算 6020 组的总功率限额*/
+      /*计算 6020的总功率限额*/
       float limit_power_6020_total =
           std::min(required_power_6020_sum, available_power * 0.8f);
 
-      /*计算 3508 组的总功率限额 (剩下的全部)*/
+      /*计算 3508的总功率限额 (剩下的全部)*/
       float limit_power_3508_total =
           std::max(0.0f, available_power - limit_power_6020_total);
 
@@ -259,7 +283,6 @@ class PowerControl : public LibXR::Application {
                                       kt_6020_, k1_6020_, k2_6020_,
                                       output_current_6020_[i]);
         } else {
-          /*负功或零功，不需要限制，直接通过*/
           powercontrol_data_.new_output_current_6020[i] =
               output_current_6020_[i];
         }
@@ -276,14 +299,12 @@ class PowerControl : public LibXR::Application {
                                       kt_3508_, k1_3508_, k2_3508_,
                                       output_current_3508_[i]);
         } else {
-          // 负功或零功，不需要限制，直接通过
           powercontrol_data_.new_output_current_3508[i] =
               output_current_3508_[i];
         }
       }
 
     } else {
-      /*功率充足，不限制*/
       powercontrol_data_.is_power_limited = false;
       for (int i = 0; i < 4; i++) {
         powercontrol_data_.new_output_current_3508[i] = output_current_3508_[i];
