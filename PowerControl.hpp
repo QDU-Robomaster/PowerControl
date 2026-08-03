@@ -4,14 +4,15 @@
 module_name: PowerControl
 module_description: Power control for chassis (supports omni and helm wheel)
 constructor_args:
-  - superpower: '@&superpower'
+  - superpower: '@nullptr'
   - is_helm: false
   - chassis_static_power_loss: 3.5
   - motor_count_3508: 4
   - motor_count_6020: 0
 template_args: []
 required_hardware: []
-depends: []
+depends:
+  - qdu-future/SuperPower
 === END MANIFEST === */
 // clang-format on
 
@@ -105,6 +106,7 @@ class PowerControl : public LibXR::Application {
                               : motor_count_6020) {
     UNUSED(hw);
     UNUSED(app);
+    ASSERT(superpower_ != nullptr);
     params_3508_(0, 0) = 2.0e-07f;
     params_3508_(1, 0) = 3.0e-07f;
     k1_3508_ = params_3508_(0, 0);
