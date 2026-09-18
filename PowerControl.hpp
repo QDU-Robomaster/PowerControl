@@ -92,10 +92,13 @@ class PowerControl
     float allocation_weight_scale[MAX_MOTOR_COUNT] = {};
   };
 
-  PowerControl(SuperPower* super_power, bool is_helm = false,
-               float chassis_static_power_loss = 0.0f, int motor_count_3508 = 4,
-               int motor_count_6020 = 4)
-      : superpower_(super_power),
+  PowerControl(
+      SuperPower& super_power,
+      bool is_helm = false,
+      float chassis_static_power_loss = 0.0f,
+      int motor_count_3508 = 4,
+      int motor_count_6020 = 4)
+      : superpower_(&super_power),
         is_helm_(is_helm),
         rls_(1e-5f, 0.99999f),
         k3_chassis_(chassis_static_power_loss),
