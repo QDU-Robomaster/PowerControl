@@ -1,7 +1,6 @@
 #pragma once
 // clang-format off
 /* === MODULE MANIFEST V2 ===
-module_name: PowerControl
 module_description: Power control for chassis (supports omni and helm wheel)
 depends:
 - id: QDU-Robomaster/SuperPower
