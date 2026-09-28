@@ -223,8 +223,6 @@ class PowerControl
 
   bool IsOnline() { return superpower_->IsOnline(); }
 
-  void OnMonitor() {}
-
  private:
   void OutputLimitOmni(float max_power)
   {
