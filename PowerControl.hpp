@@ -18,12 +18,32 @@ depends:
 #include "message.hpp"
 #include "thread.hpp"
 
+/// 速度误差总和高于该值时，功率全部按误差分配
+/// Above this speed error sum, power is allocated entirely by error
 #define ERROR_POWERDISTRIBUTION_SET 20
+/// 速度误差总和低于该值时，功率全部按需求比例分配
+/// Below this speed error sum, power is allocated entirely by demand ratio
 #define POP_POWERDISTRIBUTION 15
-#define CHASSIS_POWER_LIMIT_MARGIN_W 4.0f /* 底盘限功率余量 */
+/// 底盘限功率余量 (W)
+/// Chassis power limit margin (W)
+#define CHASSIS_POWER_LIMIT_MARGIN_W 4.0f
 
 /**
- * @brief 计算单个电机模型预测功率 (不含静态损耗)
+ * @brief 计算单个电机的模型预测功率，不含静态损耗。
+ *        Compute the model-predicted power of one motor, excluding the static loss.
+ *
+ * @param current 电机电流。
+ *                Motor current.
+ * @param rpm 转子转速 (rpm)。
+ *            Rotor speed (rpm).
+ * @param kt 机械功率系数。
+ *           Mechanical power coefficient.
+ * @param k1 电流平方项系数。
+ *           Coefficient of the squared current term.
+ * @param k2 转速平方项系数。
+ *           Coefficient of the squared speed term.
+ * @return 预测功率 (W)。
+ *         Predicted power (W).
  */
 inline float calculate_motor_model_power(float current, float rpm, float kt, float k1,
                                          float k2)
@@ -32,7 +52,24 @@ inline float calculate_motor_model_power(float current, float rpm, float kt, flo
 }
 
 /**
- * @brief 根据目标功率反解电流
+ * @brief 由目标功率反解电流，结果限幅到 ±16384。
+ *        Solve the current from a target power, clamped to ±16384.
+ *
+ * @param target_power 目标功率 (W)。
+ *                     Target power (W).
+ * @param rpm 转子转速 (rpm)。
+ *            Rotor speed (rpm).
+ * @param kt 机械功率系数。
+ *           Mechanical power coefficient.
+ * @param k1 电流平方项系数。
+ *           Coefficient of the squared current term.
+ * @param k2 转速平方项系数。
+ *           Coefficient of the squared speed term.
+ * @param original_current 原始期望电流，其符号决定取二次方程的哪个根。
+ *                         Original desired current, whose sign selects the root of the
+ *                         quadratic equation.
+ * @return 反解得到的电流。
+ *         Solved current.
  */
 inline float solve_current_for_power(float target_power, float rpm, float kt, float k1,
                                      float k2, float original_current)
@@ -69,28 +106,77 @@ inline float solve_current_for_power(float target_power, float rpm, float kt, fl
   return std::clamp(final_current, -16384.0f, 16384.0f);
 }
 
-static constexpr int POWER_CONTROL_MAX_MOTOR_COUNT = 6; /* 最大电机数目 */
+/// 最大电机数量
+/// Maximum number of motors
+static constexpr int POWER_CONTROL_MAX_MOTOR_COUNT = 6;
 
+/**
+ * @brief 功率限制后的输出。
+ *        Output after the power limit.
+ */
 struct PowerControlData
 {
+  /// 3508 功率限制后的电流
+  /// Currents of the 3508 motors after the power limit
   float new_output_current_3508[POWER_CONTROL_MAX_MOTOR_COUNT] = {};
+  /// 6020 功率限制后的电流
+  /// Currents of the 6020 motors after the power limit
   float new_output_current_6020[POWER_CONTROL_MAX_MOTOR_COUNT] = {};
+  /// 是否触发了功率限制
+  /// Whether the power limit was applied
   bool is_power_limited = false;
 };
 
+/**
+ * @brief 底盘功率控制模块：按功率上限重新分配各电机的输出电流，支持全向轮与舵轮底盘。
+ *        Chassis power control Module that redistributes the motor output currents
+ *        under a power limit, for omni-wheel and steering-wheel chassis.
+ */
 class PowerControl
 {
  public:
+  /// 最大电机数量
+  /// Maximum number of motors
   static constexpr int MAX_MOTOR_COUNT = POWER_CONTROL_MAX_MOTOR_COUNT;
-  /* 3508 组分配偏置: 先保底, 再分剩余功率 */
+
+  /**
+   * @brief 3508 组的分配偏置：先按保底池分配，再分剩余功率。
+   *        Allocation bias of the 3508 group: distribute a reserve pool first, then
+   *        the remaining power.
+   */
   struct AllocationBias3508
   {
+    /// 是否启用
+    /// Whether enabled
     bool enabled = false;
+    /// 可用功率中作为保底池的比例，范围 [0, 1]
+    /// Fraction of the available power used as the reserve pool, in [0, 1]
     float reserve_fraction = 0.0f;
+    /// 保底池分配权重
+    /// Reserve pool allocation weights
     float reserve_weight[MAX_MOTOR_COUNT] = {};
+    /// 剩余功率权重的缩放，未配置或不大于 0 时为 1
+    /// Scale of the remaining-power weights, 1 when unset or not greater than 0
     float allocation_weight_scale[MAX_MOTOR_COUNT] = {};
   };
 
+  /**
+   * @brief 构造 PowerControl。
+   *        Construct PowerControl.
+   *
+   * @param super_power SuperPower 实例，提供实测底盘功率与超级电容在线状态。
+   *                    SuperPower instance that provides the measured chassis power
+   *                    and the supercapacitor online state.
+   * @param is_helm true 为舵轮底盘，同时限制 6020；false 为全向轮底盘。
+   *                True for a steering-wheel chassis, which also limits the 6020; false
+   *                for an omni-wheel chassis.
+   * @param chassis_static_power_loss 底盘静态功耗 (W)。
+   *                                  Chassis static power loss (W).
+   * @param motor_count_3508 3508 电机数量，最大 `MAX_MOTOR_COUNT`。
+   *                         Number of 3508 motors, at most `MAX_MOTOR_COUNT`.
+   * @param motor_count_6020 6020 电机数量，最大 `MAX_MOTOR_COUNT`。
+   *                         Number of 6020 motors, at most `MAX_MOTOR_COUNT`.
+   */
   PowerControl(
       SuperPower& super_power,
       bool is_helm = false,
@@ -112,6 +198,19 @@ class PowerControl
     k2_3508_ = params_3508_(1, 0);
   }
 
+  /**
+   * @brief 写入 3508 电机本周期的期望电流、转子转速和可选的速度跟踪误差。
+   *        Write the desired current, rotor speed and optional speed tracking error of
+   *        the 3508 motors for this cycle.
+   *
+   * @param output_current 期望电流数组，长度为 3508 电机数量。
+   *                       Desired current array with one entry per 3508 motor.
+   * @param rotorspeed_rpm 转子转速数组 (rpm)，长度为 3508 电机数量。
+   *                       Rotor speed array (rpm) with one entry per 3508 motor.
+   * @param speed_error 速度跟踪误差数组，取绝对值使用；为空时保持上一次的值。
+   *                    Speed tracking error array, used as absolute values; the previous
+   *                    values are kept when null.
+   */
   void SetMotorData3508(float* output_current, float* rotorspeed_rpm,
                         float* speed_error = nullptr)
   {
@@ -127,6 +226,19 @@ class PowerControl
     }
   }
 
+  /**
+   * @brief 写入 6020 电机本周期的期望电流、转子转速和可选的速度跟踪误差。
+   *        Write the desired current, rotor speed and optional speed tracking error of
+   *        the 6020 motors for this cycle.
+   *
+   * @param output_current 期望电流数组，长度为 6020 电机数量。
+   *                       Desired current array with one entry per 6020 motor.
+   * @param rotorspeed_rpm 转子转速数组 (rpm)，长度为 6020 电机数量。
+   *                       Rotor speed array (rpm) with one entry per 6020 motor.
+   * @param speed_error 速度跟踪误差数组，取绝对值使用；为空时保持上一次的值。
+   *                    Speed tracking error array, used as absolute values; the previous
+   *                    values are kept when null.
+   */
   void SetMotorData6020(float* output_current, float* rotorspeed_rpm,
                         float* speed_error = nullptr)
   {
@@ -142,6 +254,13 @@ class PowerControl
     }
   }
 
+  /**
+   * @brief 设置 3508 组的分配偏置，仅全向轮路径使用。
+   *        Set the allocation bias of the 3508 group, used by the omni-wheel path.
+   *
+   * @param bias 分配偏置。
+   *             Allocation bias.
+   */
   void SetAllocationBias3508(const AllocationBias3508& bias)
   {
     LibXR::Mutex::LockGuard lock(mutex_);
@@ -158,6 +277,11 @@ class PowerControl
     }
   }
 
+  /**
+   * @brief 读取实测底盘功率，并用 RLS 在线辨识 3508 功率模型的 `k1`、`k2`。
+   *        Read the measured chassis power and identify `k1` and `k2` of the 3508 power
+   *        model online with RLS.
+   */
   void CalculatePowerControlParam()
   {
     LibXR::Mutex::LockGuard lock(mutex_);
@@ -198,6 +322,14 @@ class PowerControl
     }
   }
 
+  /**
+   * @brief 按功率上限计算限制后的输出电流，结果由 `GetPowerControlData()` 取回。
+   *        Compute the limited output currents under the power limit; the result is
+   *        fetched with `GetPowerControlData()`.
+   *
+   * @param max_power 底盘功率上限 (W)。
+   *                  Chassis power limit (W).
+   */
   void OutputLimit(float max_power)
   {
     LibXR::Mutex::LockGuard lock(mutex_);
@@ -211,16 +343,44 @@ class PowerControl
     }
   }
 
+  /**
+   * @brief 取回功率限制后的输出。
+   *        Fetch the output after the power limit.
+   *
+   * @return 功率限制后的输出。
+   *         Output after the power limit.
+   */
   PowerControlData GetPowerControlData()
   {
     LibXR::Mutex::LockGuard lock(mutex_);
     return powercontrol_data_;
   }
 
+  /**
+   * @brief 获取最近一次 `CalculatePowerControlParam()` 读到的实测功率。
+   *        Get the measured power read by the latest `CalculatePowerControlParam()`.
+   *
+   * @return 实测功率 (W)。
+   *         Measured power (W).
+   */
   float GetMeasuredPower() const { return measured_power_; }
 
+  /**
+   * @brief 转发 `SuperPower::GetCapEnergy()`。
+   *        Forward `SuperPower::GetCapEnergy()`.
+   *
+   * @return 超级电容能量。
+   *         Supercapacitor energy.
+   */
   float GetCapEnergy() { return superpower_->GetCapEnergy(); }
 
+  /**
+   * @brief 转发 `SuperPower::IsOnline()`。
+   *        Forward `SuperPower::IsOnline()`.
+   *
+   * @return 超级电容在线为 true。
+   *         True when the supercapacitor is online.
+   */
   bool IsOnline() { return superpower_->IsOnline(); }
 
  private:
