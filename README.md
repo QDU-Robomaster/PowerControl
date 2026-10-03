@@ -91,7 +91,7 @@ modules:
     args:
       - super_power: superpower
       - is_helm: false
-      - chassis_static_power_loss: 4.5
+      - chassis_static_power_loss: 4.5f
       - motor_count_3508: 4
       - motor_count_6020: 0
 ```
