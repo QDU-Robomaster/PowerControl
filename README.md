@@ -4,7 +4,7 @@
 
 ## 1. 模块作用 / Purpose
 
-PowerControl 支持全向轮底盘（仅 3508）和舵轮底盘（3508 驱动加 6020 转向）。它由底盘在自己的控制循环中调用，所有公共接口内部由同一把互斥锁保护。
+PowerControl 支持全向轮底盘（仅 3508）和舵轮底盘（3508 驱动加 6020 转向）。它由底盘在自己的控制循环中调用，`SetMotorData3508()`、`SetMotorData6020()`、`SetAllocationBias3508()`、`CalculatePowerControlParam()`、`OutputLimit()` 与 `GetPowerControlData()` 内部由同一把互斥锁保护。
 
 每个控制周期，底盘按下面顺序调用：
 
@@ -23,7 +23,7 @@ PowerControl 支持全向轮底盘（仅 3508）和舵轮底盘（3508 驱动加
 
 电机数量上限为 `PowerControl::MAX_MOTOR_COUNT`（6），超出部分被截断。3508 的 `kt` 与 6020 的 `kt`、`k1`、`k2` 是源码中的固定常数。
 
-PowerControl supports omni-wheel chassis (3508 only) and steering-wheel chassis (3508 drive plus 6020 steering). The chassis calls it in its own control loop, and all public interfaces are protected internally by the same mutex.
+PowerControl supports omni-wheel chassis (3508 only) and steering-wheel chassis (3508 drive plus 6020 steering). The chassis calls it in its own control loop, and `SetMotorData3508()`, `SetMotorData6020()`, `SetAllocationBias3508()`, `CalculatePowerControlParam()`, `OutputLimit()` and `GetPowerControlData()` are protected internally by the same mutex.
 
 Every control cycle, the chassis calls in the following order:
 
