@@ -177,12 +177,9 @@ class PowerControl
    * @param motor_count_6020 6020 电机数量，最大 `MAX_MOTOR_COUNT`。
    *                         Number of 6020 motors, at most `MAX_MOTOR_COUNT`.
    */
-  PowerControl(
-      SuperPower& super_power,
-      bool is_helm = false,
-      float chassis_static_power_loss = 0.0f,
-      int motor_count_3508 = 4,
-      int motor_count_6020 = 4)
+  PowerControl(SuperPower& super_power, bool is_helm = false,
+               float chassis_static_power_loss = 0.0f, int motor_count_3508 = 4,
+               int motor_count_6020 = 4)
       : superpower_(&super_power),
         is_helm_(is_helm),
         rls_(1e-5f, 0.99999f),
