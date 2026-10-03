@@ -11,7 +11,7 @@ class RLS {
  public:
   using ParamVector = Eigen::Matrix<float, dim, 1>;
 
-  RLS() = delete;  // 必须只能带参数的构造函数
+  RLS() = delete;
 
   /**
    * @brief 构造 RLS 估计器

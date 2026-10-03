@@ -1,7 +1,7 @@
 #pragma once
 // clang-format off
 /* === MODULE MANIFEST V2 ===
-module_description: Power control for chassis (supports omni and helm wheel)
+module_description: 底盘功率控制模块：按功率上限重新分配各电机的输出电流，支持全向轮与舵轮底盘 / Chassis power control Module that redistributes the motor output currents under a power limit, for omni-wheel and steering-wheel chassis
 depends:
 - id: QDU-Robomaster/SuperPower
   ref: same-or-dev
