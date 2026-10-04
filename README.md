@@ -1,6 +1,6 @@
 # PowerControl
 
-底盘功率控制模块：按功率上限重新分配各电机的输出电流，支持全向轮与舵轮底盘 / Chassis power control Module that redistributes the motor output currents under a power limit, for omni-wheel and steering-wheel chassis
+底盘功率控制模块：按功率上限重新分配各电机的输出电流，支持全向轮、麦轮与舵轮底盘 / Chassis power control Module that redistributes the motor output currents under a power limit, for omni-wheel, mecanum and steering-wheel chassis
 
 ## 1. 模块作用 / Purpose
 
