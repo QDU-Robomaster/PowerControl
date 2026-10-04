@@ -1,7 +1,7 @@
 #pragma once
 // clang-format off
 /* === MODULE MANIFEST V2 ===
-module_description: 底盘功率控制模块：按功率上限重新分配各电机的输出电流，支持全向轮与舵轮底盘 / Chassis power control Module that redistributes the motor output currents under a power limit, for omni-wheel and steering-wheel chassis
+module_description: 底盘功率控制模块：按功率上限重新分配各电机的输出电流，支持全向轮、麦轮与舵轮底盘 / Chassis power control Module that redistributes the motor output currents under a power limit, for omni-wheel, mecanum and steering-wheel chassis
 depends:
 - id: QDU-Robomaster/SuperPower
   ref: same-or-dev
@@ -128,9 +128,10 @@ struct PowerControlData
 };
 
 /**
- * @brief 底盘功率控制模块：按功率上限重新分配各电机的输出电流，支持全向轮与舵轮底盘。
+ * @brief 底盘功率控制模块：按功率上限重新分配各电机的输出电流，支持全向轮、麦轮与舵轮
+ *        底盘。
  *        Chassis power control Module that redistributes the motor output currents
- *        under a power limit, for omni-wheel and steering-wheel chassis.
+ *        under a power limit, for omni-wheel, mecanum and steering-wheel chassis.
  */
 class PowerControl
 {
@@ -167,9 +168,9 @@ class PowerControl
    * @param super_power SuperPower 实例，提供实测底盘功率与超级电容在线状态。
    *                    SuperPower instance that provides the measured chassis power
    *                    and the supercapacitor online state.
-   * @param is_helm true 为舵轮底盘，同时限制 6020；false 为全向轮底盘。
+   * @param is_helm true 为舵轮底盘，同时限制 6020；false 为全向轮或麦轮底盘。
    *                True for a steering-wheel chassis, which also limits the 6020; false
-   *                for an omni-wheel chassis.
+   *                for an omni-wheel or mecanum chassis.
    * @param chassis_static_power_loss 底盘静态功耗 (W)。
    *                                  Chassis static power loss (W).
    * @param motor_count_3508 3508 电机数量，最大 `MAX_MOTOR_COUNT`。
@@ -252,8 +253,9 @@ class PowerControl
   }
 
   /**
-   * @brief 设置 3508 组的分配偏置，仅全向轮路径使用。
-   *        Set the allocation bias of the 3508 group, used by the omni-wheel path.
+   * @brief 设置 3508 组的分配偏置，仅全向轮与麦轮路径使用。
+   *        Set the allocation bias of the 3508 group, used by the omni-wheel and
+   *        mecanum path.
    *
    * @param bias 分配偏置。
    *             Allocation bias.
