@@ -13,7 +13,6 @@ depends:
 #include <cmath>
 #include <cstdint>
 
-#include "PowerLimit.hpp"
 #include "RLS.hpp"
 #include "SuperPower.hpp"
 #include "message.hpp"
@@ -28,6 +27,88 @@ depends:
 /// 底盘限功率余量 (W)
 /// Chassis power limit margin (W)
 #define CHASSIS_POWER_LIMIT_MARGIN_W 4.0f
+
+/**
+ * @brief 计算单个电机的模型预测功率，不含静态损耗。
+ *        Compute the model-predicted power of one motor, excluding the static loss.
+ *
+ * @param current 电机电流。
+ *                Motor current.
+ * @param rpm 转子转速 (rpm)。
+ *            Rotor speed (rpm).
+ * @param kt 机械功率系数。
+ *           Mechanical power coefficient.
+ * @param k1 电流平方项系数。
+ *           Coefficient of the squared current term.
+ * @param k2 转速平方项系数。
+ *           Coefficient of the squared speed term.
+ * @return 预测功率 (W)。
+ *         Predicted power (W).
+ */
+inline float calculate_motor_model_power(float current, float rpm, float kt, float k1,
+                                         float k2)
+{
+  return (kt * current * rpm) + (k1 * current * current) + (k2 * rpm * rpm);
+}
+
+/**
+ * @brief 由目标功率反解电流，结果限幅到 ±16384。
+ *        Solve the current from a target power, clamped to ±16384.
+ *
+ * @param target_power 目标功率 (W)。
+ *                     Target power (W).
+ * @param rpm 转子转速 (rpm)。
+ *            Rotor speed (rpm).
+ * @param kt 机械功率系数。
+ *           Mechanical power coefficient.
+ * @param k1 电流平方项系数。
+ *           Coefficient of the squared current term.
+ * @param k2 转速平方项系数。
+ *           Coefficient of the squared speed term.
+ * @param original_current 原始期望电流，其符号决定取二次方程的哪个根。
+ *                         Original desired current, whose sign selects the root of the
+ *                         quadratic equation.
+ * @return 反解得到的电流。
+ *         Solved current.
+ */
+inline float solve_current_for_power(float target_power, float rpm, float kt, float k1,
+                                     float k2, float original_current)
+{
+  float a = k1;
+  float b = kt * rpm;
+  float c = k2 * rpm * rpm - target_power;
+  float delta = b * b - 4.0f * a * c;
+
+  float x3 = -b / (2.0f * a);
+
+  float final_current = 0;
+
+  if (delta < 1e-9f)
+  {
+    final_current = x3;
+  }
+  else
+  {
+    float sqrt_delta = sqrtf(delta);
+    float x1 = (-b + sqrt_delta) / (2.0f * a);
+    float x2 = (-b - sqrt_delta) / (2.0f * a);
+
+    if (original_current >= 0)
+    {
+      final_current = x1;
+    }
+    else
+    {
+      final_current = x2;
+    }
+  }
+
+  return std::clamp(final_current, -16384.0f, 16384.0f);
+}
+
+/// 最大电机数量
+/// Maximum number of motors
+static constexpr int POWER_CONTROL_MAX_MOTOR_COUNT = 6;
 
 /**
  * @brief 功率限制后的输出。
@@ -60,6 +141,25 @@ class PowerControl
   static constexpr int MAX_MOTOR_COUNT = POWER_CONTROL_MAX_MOTOR_COUNT;
 
   /**
+   * @brief 3508 功率模型的同一时刻快照，供底盘约束求解使用。
+   *        A consistent snapshot of the 3508 power model for chassis constraints.
+   *
+   * Motor power is kt * current * rpm + k1 * current^2 + k2 * rpm^2, in W.
+   * Current is the signed motor command/feedback in LSB, not amperes; rpm is
+   * rotor speed before the gearbox. Static loss and margin are chassis watts.
+   * Coefficients are returned unchanged; callers must reject an invalid snapshot.
+   */
+  struct DrivePowerModel
+  {
+    float kt = 0.0f;
+    float k1 = 0.0f;
+    float k2 = 0.0f;
+    float static_loss = 0.0f;
+    float margin = 0.0f;
+    bool valid = false;
+  };
+
+  /**
    * @brief 3508 组的分配偏置：先按保底池分配，再分剩余功率。
    *        Allocation bias of the 3508 group: distribute a reserve pool first, then
    *        the remaining power.
@@ -87,8 +187,8 @@ class PowerControl
    * @param super_power SuperPower 实例，提供实测底盘功率与超级电容在线状态。
    *                    SuperPower instance that provides the measured chassis power
    *                    and the supercapacitor online state.
-   * @param is_helm true 为舵轮底盘，仅限制驱动轮，6020 透传；false 为全向轮或麦轮底盘。
-   *                True for drive-only power limiting on a steering-wheel chassis; false
+   * @param is_helm true 为舵轮底盘，同时限制 6020；false 为全向轮或麦轮底盘。
+   *                True for a steering-wheel chassis, which also limits the 6020; false
    *                for an omni-wheel or mecanum chassis.
    * @param chassis_static_power_loss 底盘静态功耗 (W)。
    *                                  Chassis static power loss (W).
@@ -220,7 +320,17 @@ class PowerControl
 
     float residual = measured_power_ - mechanical_power - k3_chassis_;
 
-    // The metered/modelled chassis power covers drive motors only.
+    if (is_helm_)
+    {
+      float power_6020 = 0;
+      for (int i = 0; i < motor_count_6020_; i++)
+      {
+        power_6020 +=
+            calculate_motor_model_power(output_current_6020_[i], rotorspeed_rpm_6020_[i],
+                                        kt_6020_, k1_6020_, k2_6020_);
+      }
+      residual -= power_6020;
+    }
 
     if (residual > 0 && online && measured_power_ > 5.0f)
     {
@@ -265,6 +375,27 @@ class PowerControl
   }
 
   /**
+   * @brief 在同一把锁下读取在线辨识系数、静态损耗和限功率余量。
+   *        Read live coefficients, static loss and power margin under one lock.
+   *
+   * No model identification or motor output is performed by this accessor.
+   * The acceleration optimizer budgets the signed sum of drive motor powers
+   * against the selected chassis power limit minus static_loss and margin.
+   */
+  DrivePowerModel GetDrivePowerModel()
+  {
+    LibXR::Mutex::LockGuard lock(mutex_);
+    DrivePowerModel model{
+        kt_3508_, k1_3508_, k2_3508_, k3_chassis_, CHASSIS_POWER_LIMIT_MARGIN_W, false};
+    model.valid = std::isfinite(model.kt) && model.kt >= 0.0f &&
+                  std::isfinite(model.k1) && model.k1 >= 0.0f &&
+                  std::isfinite(model.k2) && model.k2 >= 0.0f &&
+                  std::isfinite(model.static_loss) && model.static_loss >= 0.0f &&
+                  std::isfinite(model.margin) && model.margin >= 0.0f;
+    return model;
+  }
+
+  /**
    * @brief 获取最近一次 `CalculatePowerControlParam()` 读到的实测功率。
    *        Get the measured power read by the latest `CalculatePowerControlParam()`.
    *
@@ -290,42 +421,6 @@ class PowerControl
    *         True when the supercapacitor is online.
    */
   bool IsOnline() { return superpower_->IsOnline(); }
-
-  struct PowerEstimate
-  {
-    float wheel_power_w = 0.0f;
-    float steer_power_w = 0.0f;  // Steering is excluded from the drive-power budget.
-    float total_power_w = 0.0f;
-    bool valid = false;
-  };
-
-  /// Drive-motor model estimate (W), excluding steering and static board losses.
-  PowerEstimate EstimatePower(const float* current_3508, const float* rpm_3508)
-  {
-    LibXR::Mutex::LockGuard lock(mutex_);
-    PowerEstimate estimate{};
-    if (motor_count_3508_ > 0 && (!current_3508 || !rpm_3508))
-    {
-      return estimate;
-    }
-    for (int i = 0; i < motor_count_3508_; i++)
-    {
-      if (!std::isfinite(current_3508[i]) || !std::isfinite(rpm_3508[i]))
-      {
-        return {};
-      }
-      const float POWER = calculate_motor_model_power(current_3508[i], rpm_3508[i],
-                                                      kt_3508_, k1_3508_, k2_3508_);
-      if (!std::isfinite(POWER))
-      {
-        return {};
-      }
-      estimate.wheel_power_w += std::max(0.0f, POWER);
-    }
-    estimate.total_power_w = estimate.wheel_power_w;
-    estimate.valid = std::isfinite(estimate.total_power_w);
-    return estimate.valid ? estimate : PowerEstimate{};
-  }
 
  private:
   void OutputLimitOmni(float max_power)
@@ -512,23 +607,133 @@ class PowerControl
 
   void OutputLimitHelm(float max_power)
   {
-    /* 最大功率只约束 3508 驱动轮，保留模型误差与控制延迟余量。 */
-    const float AVAILABLE_POWER = max_power - CHASSIS_POWER_LIMIT_MARGIN_W;
+    float required_power_3508_sum = 0.0f;
+    float required_power_6020_sum = 0.0f;
+    float sum_error_3508 = 0.0f;
+    float sum_error_6020 = 0.0f;
 
-    /* 6020 舵向电机不参与限幅，始终保留原电流命令。 */
-    for (int i = 0; i < motor_count_6020_; i++)
-    {
-      powercontrol_data_.new_output_current_6020[i] = output_current_6020_[i];
-    }
+    /* 舵轮需要给模型误差和控制延迟留余量 */
+    float available_power =
+        std::max(0.0f, max_power - k3_chassis_ - CHASSIS_POWER_LIMIT_MARGIN_W);
 
-    const auto LIMITED = limit_power_proportionally(
-        output_current_3508_, rotorspeed_rpm_3508_, motor_count_3508_, AVAILABLE_POWER,
-        kt_3508_, k1_3508_, k2_3508_);
-    powercontrol_data_.is_power_limited = LIMITED.is_power_limited;
     for (int i = 0; i < motor_count_3508_; i++)
     {
-      motor_power_3508_[i] = LIMITED.requested_power[i];
-      powercontrol_data_.new_output_current_3508[i] = LIMITED.current[i];
+      motor_power_3508_[i] = calculate_motor_model_power(
+          output_current_3508_[i], rotorspeed_rpm_3508_[i], kt_3508_, k1_3508_, k2_3508_);
+
+      if (motor_power_3508_[i] > 0)
+      {
+        required_power_3508_sum += motor_power_3508_[i];
+        sum_error_3508 += speed_error_3508_[i];
+      }
+    }
+
+    for (int i = 0; i < motor_count_6020_; i++)
+    {
+      motor_power_6020_[i] = calculate_motor_model_power(
+          output_current_6020_[i], rotorspeed_rpm_6020_[i], kt_6020_, k1_6020_, k2_6020_);
+
+      if (motor_power_6020_[i] > 0)
+      {
+        required_power_6020_sum += motor_power_6020_[i];
+        sum_error_6020 += speed_error_6020_[i];
+      }
+    }
+
+    float total_required_power = required_power_3508_sum + required_power_6020_sum;
+
+    if (total_required_power > available_power)
+    {
+      powercontrol_data_.is_power_limited = true;
+
+      /*计算 6020 组的总功率限额*/
+      float limit_power_6020_total =
+          std::min(required_power_6020_sum, available_power * 0.8f);
+
+      /*计算 3508 组的总功率限额 (剩下的全部)*/
+      float limit_power_3508_total =
+          std::max(0.0f, available_power - limit_power_6020_total);
+
+      /* 6020 组: 误差置信度 + 混合权重分配 */
+      float ec_6020 = 0.0f;
+      if (sum_error_6020 > ERROR_POWERDISTRIBUTION_SET)
+      {
+        ec_6020 = 1.0f;
+      }
+      else if (sum_error_6020 > POP_POWERDISTRIBUTION)
+      {
+        ec_6020 = std::clamp(
+            (sum_error_6020 - static_cast<float>(POP_POWERDISTRIBUTION)) /
+                static_cast<float>(ERROR_POWERDISTRIBUTION_SET - POP_POWERDISTRIBUTION),
+            0.0f, 1.0f);
+      }
+
+      for (int i = 0; i < motor_count_6020_; i++)
+      {
+        if (motor_power_6020_[i] > 0 && required_power_6020_sum > 1e-6f)
+        {
+          float pw_err =
+              (sum_error_6020 > 1e-6f) ? (speed_error_6020_[i] / sum_error_6020) : 0.0f;
+          float pw_prop = motor_power_6020_[i] / required_power_6020_sum;
+          float pw = ec_6020 * pw_err + (1.0f - ec_6020) * pw_prop;
+          float power_quota = limit_power_6020_total * pw;
+
+          powercontrol_data_.new_output_current_6020[i] =
+              solve_current_for_power(power_quota, rotorspeed_rpm_6020_[i], kt_6020_,
+                                      k1_6020_, k2_6020_, output_current_6020_[i]);
+        }
+        else
+        {
+          powercontrol_data_.new_output_current_6020[i] = output_current_6020_[i];
+        }
+      }
+
+      /*误差置信度 + 混合权重分配 */
+      float ec_3508 = 0.0f;
+      if (sum_error_3508 > ERROR_POWERDISTRIBUTION_SET)
+      {
+        ec_3508 = 1.0f;
+      }
+      else if (sum_error_3508 > POP_POWERDISTRIBUTION)
+      {
+        ec_3508 = std::clamp(
+            (sum_error_3508 - static_cast<float>(POP_POWERDISTRIBUTION)) /
+                static_cast<float>(ERROR_POWERDISTRIBUTION_SET - POP_POWERDISTRIBUTION),
+            0.0f, 1.0f);
+      }
+
+      for (int i = 0; i < motor_count_3508_; i++)
+      {
+        if (motor_power_3508_[i] > 0 && required_power_3508_sum > 1e-6f)
+        {
+          float pw_err =
+              (sum_error_3508 > 1e-6f) ? (speed_error_3508_[i] / sum_error_3508) : 0.0f;
+          float pw_prop = motor_power_3508_[i] / required_power_3508_sum;
+          float pw = ec_3508 * pw_err + (1.0f - ec_3508) * pw_prop;
+          float power_quota = limit_power_3508_total * pw;
+
+          powercontrol_data_.new_output_current_3508[i] =
+              solve_current_for_power(power_quota, rotorspeed_rpm_3508_[i], kt_3508_,
+                                      k1_3508_, k2_3508_, output_current_3508_[i]);
+        }
+        else
+        {
+          powercontrol_data_.new_output_current_3508[i] = output_current_3508_[i];
+        }
+      }
+    }
+    else
+    {
+      /*功率充足，不限制*/
+      powercontrol_data_.is_power_limited = false;
+      for (int i = 0; i < motor_count_3508_; i++)
+      {
+        powercontrol_data_.new_output_current_3508[i] = output_current_3508_[i];
+      }
+      for (int i = 0; i < motor_count_6020_; i++)
+      {
+        powercontrol_data_.new_output_current_6020[i] = output_current_6020_[i];
+      }
     }
   }
 
@@ -560,8 +765,13 @@ class PowerControl
   float rotorspeed_rpm_3508_[MAX_MOTOR_COUNT] = {};
   float motor_power_3508_[MAX_MOTOR_COUNT] = {};
 
+  float kt_6020_ = 1.42074505e-5f;
+  float k1_6020_ = 6.4276e-7f;
+  float k2_6020_ = 1.0e-10f;
+
   float output_current_6020_[MAX_MOTOR_COUNT] = {};
   float rotorspeed_rpm_6020_[MAX_MOTOR_COUNT] = {};
+  float motor_power_6020_[MAX_MOTOR_COUNT] = {};
 
   float measured_power_ = 0.0f;
 };
