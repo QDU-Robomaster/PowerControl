@@ -141,6 +141,25 @@ class PowerControl
   static constexpr int MAX_MOTOR_COUNT = POWER_CONTROL_MAX_MOTOR_COUNT;
 
   /**
+   * @brief 3508 功率模型的同一时刻快照，供底盘约束求解使用。
+   *        A consistent snapshot of the 3508 power model for chassis constraints.
+   *
+   * Motor power is kt * current * rpm + k1 * current^2 + k2 * rpm^2, in W.
+   * Current is the signed motor command/feedback in LSB, not amperes; rpm is
+   * rotor speed before the gearbox. Static loss and margin are chassis watts.
+   * Coefficients are returned unchanged; callers must reject an invalid snapshot.
+   */
+  struct DrivePowerModel
+  {
+    float kt = 0.0f;
+    float k1 = 0.0f;
+    float k2 = 0.0f;
+    float static_loss = 0.0f;
+    float margin = 0.0f;
+    bool valid = false;
+  };
+
+  /**
    * @brief 3508 组的分配偏置：先按保底池分配，再分剩余功率。
    *        Allocation bias of the 3508 group: distribute a reserve pool first, then
    *        the remaining power.
@@ -353,6 +372,27 @@ class PowerControl
   {
     LibXR::Mutex::LockGuard lock(mutex_);
     return powercontrol_data_;
+  }
+
+  /**
+   * @brief 在同一把锁下读取在线辨识系数、静态损耗和限功率余量。
+   *        Read live coefficients, static loss and power margin under one lock.
+   *
+   * No model identification or motor output is performed by this accessor.
+   * The acceleration optimizer budgets the signed sum of drive motor powers
+   * against the selected chassis power limit minus static_loss and margin.
+   */
+  DrivePowerModel GetDrivePowerModel()
+  {
+    LibXR::Mutex::LockGuard lock(mutex_);
+    DrivePowerModel model{
+        kt_3508_, k1_3508_, k2_3508_, k3_chassis_, CHASSIS_POWER_LIMIT_MARGIN_W, false};
+    model.valid = std::isfinite(model.kt) && model.kt >= 0.0f &&
+                  std::isfinite(model.k1) && model.k1 >= 0.0f &&
+                  std::isfinite(model.k2) && model.k2 >= 0.0f &&
+                  std::isfinite(model.static_loss) && model.static_loss >= 0.0f &&
+                  std::isfinite(model.margin) && model.margin >= 0.0f;
+    return model;
   }
 
   /**
